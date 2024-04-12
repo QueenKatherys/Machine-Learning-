@@ -1,0 +1,747 @@
+---
+title: "Final Project Final Submission CNN MODEL"
+author: "Kathleen Ashbaker"
+date: "2024-03-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## ECG Heartbeat Project
+
+The dataset you will analyze consists of Electrocardiogram (ECG) signals of single heartbeats, obtained from The PTB Diagnostic ECG DatabaseLinks to an external site., along with associated labels that classify each heartbeat as normal or abnormal.
+
+
+Remember, the goal is not just to achieve high accuracy but to ensure that your model is genuinely learning the distinguishing features between normal and abnormal heartbeats and can generalize well to unseen data.
+
+
+
+```{r libraries, echo=TRUE}
+
+# import appropriate libraries ; essentials below 
+
+library(tree) # trees, RF, boosting 
+library(dplyr) # data wrangling
+library(ggplot2) # plots 
+library(ISLR2)
+library(plotly) # plots 
+library(randomForest)
+library(rpart)
+library(caret) #confusionMatrix
+library(MASS)  # Implements LDA & QDA
+library(pROC)  # ROC & AUC
+library(class) # Implements KNN
+library(data.table)
+
+# Neural network libraries ; this assumes Python libraries 'keras' 
+# and 'tensor flow' are imported in your R environment. 
+
+library(imager) # Library to plot an image
+library(keras)
+```
+
+
+```{r upload data set, echo=TRUE}
+# upload data set into working directory
+load("~/BIOSTAT 546 Machine Learning/Homework/Final/ptb.Rdata")
+```
+
+
+## (optional) Examination of data objects, including class counts 
+```{r is data frame, echo=TRUE}
+# examine if 'X_train' and 'X_test' are data frames
+is.data.frame(X_train)
+is.data.frame(X_test)
+```
+```{r object of y_class, echo=TRUE}
+# examine class of 'y_train'
+class(y_train)
+```
+
+```{r check levels of y_train, echo=TRUE}
+
+# class counts 
+
+levels(y_train)
+table(y_train)
+
+```
+
+
+
+## (optional)Manual verification of reshape compatibility: Calculate the total number of elements and ensure they match your reshape dimensions.
+
+
+```{r verification, echo=TRUE}
+
+# Optional; examine dimensions and length of 'X_train', 'X_test', and 'y_train',
+# respectively. 
+
+#total_elements_train <- prod(dim(X_train))
+#expected_elements_train <- nrow(X_train) * 187 * 1
+#print(total_elements_train == expected_elements_train)  # Should be TRUE
+
+#total_elements_test <- prod(dim(X_test))
+#expected_elements_test <- nrow(X_test) * 187 * 1
+#print(total_elements_test == expected_elements_test)  # Should be TRUE
+
+#print(dim(X_train))  # Should return something like c(10552, 187) 
+
+#print(dim(X_test))
+
+nrow(X_train)
+
+nrow(X_test)
+
+
+length(y_train)
+```
+
+## Scaling the Data
+
+Scaling the data is crucial for neural network performance. Ensure the features are scaled to a similar range, such as [0, 1] or with mean 0 and standard deviation 1.
+
+```{r scale data, echo=TRUE}
+
+# Scale the data, ensuring no division by zero or subtraction of infinite values
+X_train_scaled <- scale(X_train) # Assuming X_train is your raw data matrix
+X_test_scaled <- scale(X_test)   # Assuming X_test is your raw data matrix
+
+
+
+```
+
+
+Solving for Na values 
+```{r}
+# Identify columns in X_train with zero variance
+zero_var_cols_train <- apply(X_train, 2, var) == 0
+# Print indices or names of columns with zero variance
+which(zero_var_cols_train)
+
+# Identify columns in X_test with zero variance
+zero_var_cols_test <- apply(X_test, 2, var) == 0
+# Print indices or names of columns with zero variance
+which(zero_var_cols_test)
+
+```
+
+
+
+Handling Zero Variance Features
+After identifying the columns with zero variance, you have a few options:
+
+Exclude these features from both your training and testing datasets before scaling since they don't contribute to distinguishing between the classes.
+```{r exclusion, echo=TRUE}
+
+#exclude any columns in the matrix with NA values. 
+
+X_train_no_zero_var <- X_train[, !zero_var_cols_train]
+X_test_no_zero_var <- X_test[, !zero_var_cols_test]
+
+# redfine 'X_train_scaled' and 'X_test_scaled'
+
+X_train_scaled <- scale(X_train_no_zero_var)
+X_test_scaled <- scale(X_test_no_zero_var)
+
+```
+
+
+```{r check scaled matrices, echo=TRUE}
+
+# Proceed to check scaled 'X_train' and 'X_test' matrices 
+is.matrix(X_train_scaled)
+is.matrix(X_test_scaled)
+
+
+sum(is.na(X_train_scaled))
+sum(is.na(X_test_scaled))
+
+```
+
+
+```{r infinite values of y_train, echo=TRUE}
+
+# Check for infinite values for 'y_train'
+sum(is.infinite(X_train_scaled))
+sum(is.infinite(X_test_scaled))
+```
+
+
+
+
+
+
+
+##Reshaping the Data for Keras
+
+```{r reshape keras, echo=TRUE}
+library(keras)
+
+# Reshape Your Data Again:
+
+# After scaling, ensure that the reshaping to add a channel dimension for CNN does # not introduce NaN or infinite values.
+
+X_train_array <- array_reshape(X_train_scaled, c(nrow(X_train_scaled), ncol(X_train_scaled), 1))
+X_test_array <- array_reshape(X_test_scaled, c(nrow(X_test_scaled), ncol(X_test_scaled), 1))
+
+
+```
+
+Check for NA values for array 
+
+```{r check array for NA values, echo= TRUE }
+
+# check arrays 'X_train_array' and 'X_test_array' for NA values 
+is.array(X_train_array)
+is.array(X_test_array)
+         
+sum(is.na(X_train_array))
+sum(is.na(X_test_array))
+```
+
+Check for infinte values in arrays: 
+
+```{r check infinite values in arrays, echo=TRUE}
+
+# Check for infinte values in arrays 'X_train_array' and 'X_test_array'
+
+sum(is.infinite(X_train_array))
+sum(is.infinite(X_test_array))
+```
+
+
+
+
+```{r CNN model building, echo=TRUE}
+
+# Build the CNN Model 
+
+library(keras)
+
+model <- keras_model_sequential() %>%
+  layer_conv_1d(filters = 64, kernel_size = 5, activation = 'relu', input_shape = c(186, 1)) %>%
+  layer_max_pooling_1d(pool_size = 2) %>%
+  layer_flatten() %>%
+  layer_dense(units = 100, activation = 'relu') %>%
+  layer_dense(units = 1, activation = 'sigmoid')
+
+model %>% compile(
+  optimizer = 'adam',
+  loss = 'binary_crossentropy',
+  metrics = c('accuracy')
+)
+
+
+```
+
+
+
+```{r y_train numeric, echo=TRUE}
+# Convert factor to numeric
+# Assuming your factor levels are correctly ordered (first level is '0', second is '1')
+# Convert factor to numeric correctly without subtracting 1
+y_train_numeric <- as.numeric(as.character(y_train))
+is.vector(y_train_numeric)
+
+```
+
+
+```{r check for NaN, echo=TRUE}
+
+# Check for NaN or NA in y_train_numeric
+sum(is.nan(y_train_numeric)) + sum(is.na(y_train_numeric))
+
+```
+
+
+
+```{r Check Label Distribution for y_train, echo=TRUE}
+table(y_train_numeric)
+
+```
+# Class Imbalance: 
+
+
+Given this understanding and the corrected label encoding, you should consider strategies to manage the class imbalance during model training. This imbalance could bias the model towards predicting the majority class (in this case, abnormal heartbeats). Several strategies could be employed:
+
+
+1. Class Weighting
+You can assign a higher weight to the minority class (normal heartbeats) during the training process. This approach makes the model "pay more attention" to the minority class. In Keras, you can use the class_weight parameter in the fit function to do this.
+
+Example:
+
+```{r class weights, echo=TRUE}
+class_weights <- list((1 / 2046) * (10552 / 2.0), (1 / 8506) * (10552 / 2.0))
+names(class_weights) <- c("0", "1")
+
+
+```
+
+
+
+## Training the CNN Model: 
+
+
+
+
+
+```{r CNN model fitting, echo=TRUE}
+# Proceed with fitting of the model 
+
+
+history <- model %>% fit(
+  x = X_train_array, 
+  y = y_train_numeric, 
+  epochs = 50, 
+  batch_size = 128, 
+  validation_split = 0.2 # Optionally reserve 20% of the training data for validation
+)
+
+```
+
+```{r plot the history, echo=TRUE}
+# Plot the history. 
+plot(history)
+```
+## Image Analysis of Training CNN Model: 
+
+This image is a graphical representation of the training process of a neural network over 50 epochs, plotting both loss and accuracy for training and validation datasets. There are two plots in the image:
+
+1. **Top Plot (Loss)**: Shows the loss for the training (red line) and validation (blue line) datasets over the epochs. The loss is a measure of the model's error and we aim for this to be as low as possible. The plot indicates that the loss for both datasets decreases over time, which is good as it suggests that the model is learning and improving. 
+
+2. **Bottom Plot (Accuracy)**: Displays the accuracy for the training (red line) and validation (blue line) datasets over the epochs. Accuracy measures the percentage of correctly classified instances and higher values are better. The accuracy for both datasets increases over time, which is expected behavior during the training process.
+
+From the scatter points, it's clear that there's some variability in the loss and accuracy between epochs, especially in the early phases of training. However, both metrics for the training and validation data converge to a stable state, which is ideal because it suggests that the model is neither overfitting nor underfitting.
+
+The lines through the points represent smoothed trends of the metrics over epochs. These trends show that overall, the model's loss decreases and its accuracy increases, which means the model is likely generalizing well to new, unseen data.
+
+It's important to note that while the training loss continues to decrease and the training accuracy continues to increase, the validation loss and accuracy tend to plateau towards the end of the training. This is normal and indicates that the model has learned a representation that generalizes well to the validation set. It's crucial to monitor these trends to prevent overfitting—when the model learns the training data so well that it performs poorly on new data. However, the general stability of the validation metrics in the later epochs suggests good model performance.
+
+In summary, these plots suggest successful training dynamics. The model is learning as indicated by the decreasing loss and increasing accuracy. The fact that the validation metrics follow closely to the training metrics without diverging significantly suggests the model is generalizing well without overfitting.
+
+## Assessment 
+
+
+The model output you've shared is a summary of the training process of a machine learning model over 50 epochs, including both training and validation metrics. Here's a detailed explanation of each part of the output:
+
+### Epochs
+- The model was trained for 50 epochs. An epoch is one complete pass through the entire training dataset.
+
+### Steps per Epoch
+- There were 66 steps per epoch. This number usually depends on the total number of training samples divided by the batch size (the number of samples processed before the model is updated).
+
+### Training Phase Metrics
+- **Loss**: Represents the model's error or the difference between the predicted values and the actual values. A lower loss indicates better model performance. The loss decreased significantly from 0.3746 in the first epoch to 0.0012 in the 50th epoch, showing the model learned effectively from the training data.
+- **Accuracy**: Measures the percentage of correctly predicted instances out of all predictions. The training accuracy improved from 81.95% in the first epoch to 100% in the final epoch, indicating the model perfectly learned to classify the training data.
+
+### Validation Phase Metrics
+- **val_loss**: This is the model's loss (error) on the validation dataset. Unlike the training loss, the validation loss is not used for training the model but to evaluate its performance on unseen data. It's crucial for detecting overfitting. The validation loss started at 0.2712 and had fluctuations throughout the training but decreased overall, reaching 0.0429 by the 50th epoch.
+- **val_accuracy**: Represents the accuracy of the model on the validation set. This metric started at 85.03% and increased to 98.86% by the end of training. High validation accuracy suggests that the model generalizes well to new, unseen data.
+
+### Observations and Implications
+- The model's training performance improved consistently, reaching perfect accuracy, which suggests it has effectively learned the training dataset.
+- The validation accuracy also increased significantly, indicating good generalization. However, the fluctuations in validation loss across epochs, especially noticeable drops and rises (e.g., a drop at epoch 10 followed by an increase in subsequent epochs), might suggest the learning process encountered some variability in how well the model predictions matched the validation data. This is normal in the training process, especially with complex datasets.
+- Reaching a high level of accuracy and a low level of loss in both training and validation suggests a well-fitted model. However, achieving 100% training accuracy might also raise concerns about overfitting, where the model learns the training data too well, including its noise and outliers, which can negatively impact its performance on new data. The validation metrics are crucial here; as long as they continue to improve or remain stable, the model is likely generalizing well.
+- In practice, monitoring both training and validation metrics is essential for diagnosing model behavior, such as underfitting (both accuracies are low) or overfitting (training accuracy is high, but validation accuracy is much lower). The metrics provided indicate a successful training process with effective learning and generalization up to the last epoch reported.
+
+
+
+
+
+# Final Epoch Assessment: 
+
+
+The final epoch of training shows the following:
+
+- **Training Loss**: The training loss is very low at 0.0012, which indicates the model makes very small errors in predictions on the training dataset.
+
+- **Training Accuracy**: The training accuracy is at its maximum possible value of 1.0000 (or 100%). This means that the model correctly predicts every instance in the training dataset.
+
+- **Validation Loss**: The validation loss is 0.0429, which is higher than the training loss. The validation loss measures how well the model is doing on data it hasn't seen during training (i.e., the validation dataset).
+
+- **Validation Accuracy**: The validation accuracy is 0.9886 (or 98.86%). This is a high accuracy and suggests that the model generalizes well to unseen data, but it is slightly lower than the training accuracy.
+
+Assessment:
+
+1. **Overfitting Check**: There's a significant difference between training and validation loss, with training loss being almost negligible compared to validation loss. This could be a sign of overfitting; however, the validation accuracy remains high. Overfitting is usually a concern when validation metrics are much worse than training metrics or if validation metrics start to worsen while training metrics improve. Here, the model still performs well on the validation set, so overfitting, if present, may not be severely impacting the model's generalization.
+
+2. **Generalization**: The high validation accuracy indicates the model generalizes well to new data, despite the disparity in loss values. The high accuracy shows the model's usefulness in practical applications where it's critical to have a model that can perform well on data it hasn't seen before.
+
+3. **Possible Improvements**: To further improve the model or confirm its performance:
+   - More training data or more diverse data could help if overfitting is suspected.
+   - Using techniques such as cross-validation could provide a more robust evaluation of the model's performance.
+   - Regularization techniques like dropout, L1/L2 regularization, or data augmentation could help to reduce overfitting.
+   - Tuning hyperparameters or early stopping could be used if there's concern about overfitting.
+
+In summary, the final epoch suggests a strong model performance with potential signs of overfitting that are not significantly detrimental to model generalization given the high validation accuracy. It may be beneficial to take steps to ensure that the model is as robust as possible.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Output 4000 test observations from this model:
+
+```{r predicitions on this model output 4000, echo=TRUE}
+# Make predictions on the test data
+predictions <- predict(model, X_test_scaled)
+
+# Assuming your predictions are probabilities and you need to convert them to binary classes (0 or 1)
+# You may need to adjust predictions depending on your model output (e.g., if using sigmoid activation in the output layer for binary classification)
+adjusted_predictions <- ifelse(predictions > 0.5, 1, 0)
+
+# Ensure the predictions are integers (0 or 1)
+adjusted_predictions <- as.integer(adjusted_predictions)
+
+# Validate the number of adjusted predictions
+if (length(adjusted_predictions) != 4000) {
+  stop("The number of adjusted predictions does not match the expected 4000 observations in the test set.")
+}
+
+# Save the adjusted predictions to a text file
+write.table(adjusted_predictions, "adjusted_predictionsCNN.txt", row.names = FALSE, col.names = FALSE, quote = FALSE, sep="\n")
+
+cat("Adjusted predictions saved: 4000 rows in 'adjusted_predictionsCNN.txt'.\n")
+```
+
+
+
+
+
+
+
+
+
+
+## Cross Validation 
+
+
+Based on the facts presented:
+
+The training accuracy reached 100%, suggesting that the model has learned to classify the training dataset perfectly.
+The validation accuracy is high (98.86% by epoch 50), which indicates good generalization to unseen data.
+The loss values show appropriate convergence, with training loss decreasing to a very low level and validation loss decreasing overall and stabilizing.
+These points suggest that the model is learning distinguishing features between normal and abnormal heartbeats effectively and can generalize well to unseen data. However, high performance on a single validation set is not always sufficient to guarantee that the model will perform well across all possible unseen datasets.
+
+Further cross-validation can help to ensure that the model's performance is consistent across different subsets of the data. In k-fold cross-validation, the data is divided into k subsets, and the model is trained k times, each time using a different subset as the validation set and the remaining data for training. This process can provide a more robust estimate of the model's performance and can help to detect if the model's performance is overly dependent on the particular choice of the validation set.
+
+
+
+```{r k fold cross validation, echo=TRUE}
+library(keras)
+library(caret)
+
+# Assuming you have the following data
+# X_train_array <- ... your training data as an array
+# y_train_numeric <- ... your binary labels as a numeric vector
+
+# Define the number of folds
+k <- 5
+
+# Create k equally sized folds
+folds <- createFolds(y_train_numeric, k = k, list = TRUE)
+
+# Storage for fold performance
+accuracy_per_fold <- vector("numeric", length = k)
+
+# Loop over the folds
+# Loop over the folds
+for(i in 1:k) {
+  # Split data into training and validation sets
+  train_indices <- unlist(folds[-i])
+  valid_indices <- unlist(folds[i])
+  
+  X_train_fold <- X_train_array[train_indices, , ]
+  y_train_fold <- y_train_numeric[train_indices]
+  
+  X_valid_fold <- X_train_array[valid_indices, , ]
+  y_valid_fold <- y_train_numeric[valid_indices]
+
+  # Build the CNN model
+  model_val <- keras_model_sequential() %>%
+    layer_conv_1d(filters = 64, kernel_size = 5, activation = 'relu', input_shape = c(186, 1)) %>%
+    layer_max_pooling_1d(pool_size = 2) %>%
+    layer_flatten() %>%
+    layer_dense(units = 100, activation = 'relu') %>%
+    layer_dense(units = 1, activation = 'sigmoid')
+  
+  # Compile the model
+  model_val %>% compile(
+    optimizer = 'adam',
+    loss = 'binary_crossentropy',
+    metrics = c('accuracy')
+  )
+  
+  # Fit the model to the fold training data
+  model_val %>% fit(
+    x = X_train_fold, 
+    y = y_train_fold,
+    epochs = 50, 
+    batch_size = 32, 
+    validation_data = list(X_valid_fold, y_valid_fold)
+  )
+  
+  # Evaluate the model on the fold validation data
+  scores <- model_val %>% evaluate(X_valid_fold, y_valid_fold)
+  
+  # Accessing elements of an atomic vector by name
+  accuracy_per_fold[i] <- scores["accuracy"]
+
+  
+  # Clear the model memory
+  k_clear_session()
+}
+
+```
+
+
+
+
+```{r average accuracy across k folds, echo=TRUE}
+# The average accuracy across all k-folds
+mean_accuracy <- mean(accuracy_per_fold)
+print(paste("Average Accuracy across all folds:", mean_accuracy))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Output of K-fold Cross Validated Model 
+
+```{r}
+# Make predictions on the test data
+predictions_kval <- predict(model_val, X_test_scaled)
+
+# Assuming your predictions are probabilities and you need to convert them to binary classes (0 or 1)
+# You may need to adjust predictions depending on your model output (e.g., if using sigmoid activation in the output layer for binary classification)
+adjusted_predictions_kval <- ifelse(predictions_kval > 0.5, 1, 0)
+
+# Ensure the predictions are integers (0 or 1)
+adjusted_predictions_kval <- as.integer(adjusted_predictions_kval)
+
+# Validate the number of adjusted predictions
+if (length(adjusted_predictions_kval) != 4000) {
+  stop("The number of adjusted predictions does not match the expected 4000 observations in the test set.")
+}
+
+# Save the adjusted predictions to a text file
+write.table(adjusted_predictions_kval, "adjusted_predictionsCNN_K_fold_CrossVal.txt", row.names = FALSE, col.names = FALSE, quote = FALSE, sep="\n")
+
+cat("Adjusted predictions saved: 4000 rows in 'adjusted_predictionsCNN_K_fold_CrossVal.txt'.\n")
+```
+
+
+
+
+
+
+
+
+
+
+
+## Assessment of K- Fold Cross-Validated Model 
+
+
+The output you've provided shows the results of training a convolutional neural network (CNN) model with k-fold cross-validation for heartbeats classification (or a similar task), focusing on differentiating between normal and abnormal patterns. Here's a summary and assessment of the output:
+
+1. **Training and Validation Performance**: Across the epochs, both training and validation metrics improve, which is indicative of the model learning effectively. The model starts with lower accuracy and higher loss, and as training progresses, accuracy increases and loss decreases for both training and validation sets. This is expected behavior and shows the model is learning from the training data.
+
+2. **Model Generalization**: The validation accuracy and loss provide insights into how well the model generalizes to unseen data. High validation accuracy along with low validation loss indicates good generalization. In your case, the final epochs show high validation accuracy (around 98-99% in many folds), suggesting that the model generalizes well.
+
+3. **Overfitting Check**: There's a concern of overfitting when the training accuracy reaches 100% while the validation accuracy is lower. Overfitting occurs when the model learns the training data too well, including its noise and quirks, making it less effective at predicting unseen data. However, in this case, although the training accuracy reaches 1.000 (or 100%), the high validation accuracy suggests that the model still generalizes well. The slight difference between training and validation accuracy is normal and does not necessarily indicate significant overfitting.
+
+4. **Consistency Across Folds**: The process seems to have been repeated across several folds (as indicated by the repeating "Epoch 1/50" indicating the start of training for a new fold), which is part of the k-fold cross-validation. This method helps ensure that the model's performance is robust and not overly dependent on a particular split of the data. Consistently high performance across different folds is a good indicator that the model will perform well on new, unseen data.
+
+5. **Final Model Selection**: After k-fold cross-validation, you can either choose the best-performing model out of the k folds or retrain a new model on all of the available training data using the same architecture and hyperparameters that seemed to work best during cross-validation. The high validation accuracies suggest that the architecture and training procedure are effective for this task.
+
+In summary, your CNN model shows excellent performance in both training and validation phases, demonstrating effective learning and good generalization capabilities. The use of k-fold cross-validation further supports the model's robustness. While there's always a concern for overfitting when training accuracy is perfect, the validation results suggest that, in this case, the model remains effective for unseen data. Future steps might include testing the model on a completely independent test set (if not already done) to further confirm its generalization capability.
+
+
+## Average Accuracy Across All Folds: 
+
+The statement you provided indicates the outcome of evaluating a model's performance using k-fold cross-validation in R. Specifically, it reports the average accuracy obtained across all folds of the cross-validation process as approximately 98.49%.
+
+In k-fold cross-validation, the dataset is randomly partitioned into k equally (or nearly equally) sized segments or "folds". The model is then trained k times, each time using k-1 folds for training and the remaining fold for validation. This process ensures that every data point is used for validation exactly once, and for training k-1 times. The primary goal of this method is to assess the model's ability to generalize to an independent dataset and to limit problems like overfitting.
+
+The "Average Accuracy across all folds" is calculated by averaging the accuracy scores obtained from each of the k validation sets. An accuracy score is a measure of the model's performance, representing the proportion of correct predictions made by the model over all predictions. An accuracy of 0.98493173122406 (or 98.49%) is exceptionally high and suggests that the model performs very well across different subsets of the data, indicating strong generalization capabilities.
+
+This high average accuracy signifies that the model not only learned the underlying patterns in the training data but was also able to apply this knowledge effectively to unseen data, making correct predictions with a very high success rate. In practical terms, this means the model you've developed is likely to perform very well on similar data outside of the data it was trained and validated on, assuming the new data is drawn from the same distribution as the training and validation sets.
+
+
+
+
+
+
+
+
+## Compare and Contrast K-fold Cross Validation vs. Non-validated model: 
+
+
+When comparing the results of a k-fold cross-validated model with those of a non-k-fold (traditional single validation set) cross-validated model, there are several key aspects and implications to consider:
+
+### K-Fold Cross-Validation (Average Accuracy: 98.49%)
+
+- **Generalization**: The average accuracy of 98.49% across all folds indicates that the model generalizes well to new data. Since k-fold cross-validation involves training and evaluating the model on different subsets of the data, a high average accuracy suggests the model's performance is consistent across different parts of the dataset.
+
+- **Robustness**: This method offers a more robust estimate of model performance. By averaging the accuracy across all folds, you mitigate the risk of overfitting to a specific portion of the data and obtain a more reliable indication of how the model is expected to perform on unseen data.
+
+- **Computationally Intensive**: Running k-fold cross-validation is more computationally intensive since the model is trained and evaluated k times, once for each fold. This can be a consideration in scenarios where computational resources or time are limited.
+
+### Non-K-Fold Cross-Validation (Validation Accuracy: 98.86%)
+
+- **Single Estimate**: The validation accuracy of 98.86% comes from a single train-validation split. This suggests that the model also generalizes well but only provides a snapshot based on one specific partitioning of the dataset into training and validation sets.
+
+- **Potential Bias**: Depending on the split, the validation set may not fully represent the data's distribution, leading to potentially optimistic or pessimistic estimates of model performance. The model's performance here might be particularly well-tuned to the specifics of the validation set used.
+
+- **Efficiency**: Training the model just once is computationally less demanding compared to k-fold cross-validation, making it a quicker way to assess model performance. However, the trade-off is potentially less insight into the model's generalizability.
+
+### Conclusion
+
+Both methods show high performance, with the non-k-fold model reaching a slightly higher validation accuracy (98.86%) compared to the average accuracy from k-fold cross-validation (98.49%). However, the difference is relatively small and could be within the margin of error or variability expected in model training processes.
+
+The k-fold cross-validation's average accuracy provides a more comprehensive and robust measure of the model's ability to generalize, as it encompasses multiple training and validation cycles across different segments of the data. The slight drop in accuracy compared to the single validation set method is not necessarily indicative of poorer performance but rather a more conservative and potentially reliable estimate of how the model will perform in real-world applications.
+
+In practice, choosing between these methods depends on the specific requirements of your project, including the need for computational efficiency versus the desire for a robust and reliable estimate of model performance. For critical applications, especially in fields like healthcare, finance, or safety-critical systems, the more thorough approach of k-fold cross-validation is often preferred despite its higher computational cost.
+
+
+
+
+
+
+## Caveats 
+
+
+## Class Imbalance: 
+
+Class imbalance is a common issue in machine learning, especially in medical datasets where one class (e.g., abnormal heartbeats) might significantly outnumber another (e.g., normal heartbeats). While class weighting is a valuable technique to mitigate the effects of class imbalance, there are potential caveats and considerations to keep in mind when implementing this strategy, particularly in the context of building Convolutional Neural Network (CNN) models for tasks such as heartbeat classification:
+
+### 1. Risk of Overfitting the Minority Class
+- **Explanation**: By assigning a higher weight to the minority class, the model might focus too much on the minority class samples, potentially at the expense of overall accuracy. This could lead to overfitting to the minority class, where the model performs well on the training data but poorly on unseen data.
+- **Mitigation**: Regularization techniques, such as dropout or L2 regularization, can help reduce the risk of overfitting. Additionally, using validation data to tune the amount of class weighting can help find a balance that improves generalization.
+
+### 2. Difficulty in Choosing the Right Weights
+- **Explanation**: Determining the optimal class weights is not always straightforward. Setting the weights too high for the minority class might lead to the aforementioned overfitting, whereas too low weights might not address the imbalance effectively.
+- **Mitigation**: Experiment with different weighting schemes and evaluate model performance using cross-validation. Tools like grid search or automated hyperparameter optimization can help in finding the optimal class weights.
+
+### 3. Impact on Model Evaluation Metrics
+- **Explanation**: Class weighting can affect the relevance of different evaluation metrics. For example, accuracy might not be the best metric when the data is imbalanced, as a model could achieve high accuracy by simply predicting the majority class.
+- **Mitigation**: Use evaluation metrics that account for class imbalance, such as Precision, Recall, F1 Score, or the Area Under the Receiver Operating Characteristic Curve (AUROC). These metrics provide a more nuanced view of model performance across both classes.
+
+### 4. Potential Changes in Model Training Dynamics
+- **Explanation**: Adjusting class weights alters the loss landscape that the model is optimizing against. This can lead to different training dynamics and potentially require adjustments to other training parameters (like learning rate) to ensure stable and effective learning.
+- **Mitigation**: Monitor training progress closely using both loss and relevant metrics on validation data. Be prepared to adjust training parameters and consider employing learning rate schedules or adaptative learning rate optimizers.
+
+### 5. Generalization to Other Data
+- **Explanation**: A model trained with class weighting tailored to a specific dataset's imbalance might not generalize well to other datasets with different class distributions.
+- **Mitigation**: When possible, validate the model on external datasets with known class distributions to assess its generalization capabilities. Adjust class weights based on the target dataset's class distribution if deploying the model in different settings.
+
+### Conclusion
+Class weighting is a powerful technique for addressing class imbalance, but it requires careful implementation and validation to ensure it enhances model performance without unintended side effects. Balancing class weights with other model regularization and evaluation strategies can help create robust models that perform well across diverse datasets, especially in critical applications like medical diagnosis.
+
+
+
+## K Fold Cross Validation
+
+
+While k-fold cross-validation is a powerful method for assessing model performance, particularly in ensuring that a model generalizes well across different subsets of data, there are several caveats and considerations to be mindful of, especially when applied to complex models such as Convolutional Neural Networks (CNNs) for tasks like heartbeat classification:
+
+### 1. Computational Cost
+- **Issue**: K-fold cross-validation requires the model to be trained and evaluated k times, which can be computationally expensive and time-consuming, particularly for deep learning models like CNNs that may have long training times.
+- **Consideration**: It's important to balance the benefits of robust model evaluation with the available computational resources and project timelines.
+
+### 2. Data Distribution Consistency Across Folds
+- **Issue**: If the data is not perfectly shuffled or if there are underlying patterns in the way data is distributed, some folds may end up being easier or harder than others. This can lead to variability in model performance across folds, which may affect the overall estimate of model performance.
+- **Consideration**: Ensure thorough shuffling of the data before partitioning it into folds and consider stratified sampling to maintain consistent class distributions across folds.
+
+### 3. Handling of Class Imbalance
+- **Issue**: In the context of heartbeat classification, where there might be class imbalance (e.g., more abnormal than normal heartbeats), standard k-fold cross-validation might not accurately reflect model performance on the minority class.
+- **Consideration**: Employ stratified k-fold cross-validation to preserve the percentage of samples for each class in every fold, ensuring that each fold is representative of the overall class distribution.
+
+### 4. Hyperparameter Tuning
+- **Issue**: When using k-fold cross-validation for hyperparameter tuning, there's a risk of indirectly fitting the hyperparameters to the validation sets across all folds, which could lead to overly optimistic estimates of model performance.
+- **Consideration**: Use a nested cross-validation approach or a separate validation set for hyperparameter tuning to avoid information leak and ensure a fair assessment of model performance.
+
+### 5. Interpretation of Results
+- **Issue**: High variability in performance across folds can indicate model sensitivity to the specific data subsets or potential issues with data quality or preprocessing steps.
+- **Consideration**: Investigate any folds where performance significantly deviates from the others to understand whether specific data characteristics impact model performance. This can provide insights into model robustness and areas for improvement.
+
+### Conclusion
+While k-fold cross-validation offers a more reliable estimate of model performance by leveraging the entire dataset for both training and validation, it's not without challenges, especially in terms of computational demands and ensuring consistent and fair evaluation across folds. Careful implementation and consideration of the specific challenges associated with the dataset and model being used are essential for making the most of this validation technique.
+
+
+
+
+
+## Other models worth considering: 
+
+
+When addressing class imbalance in tasks like heartbeat classification, where convolutional neural networks (CNNs) might be computationally expensive or overfit, considering alternative, less resource-intensive machine learning models is practical. These alternatives can offer competitive performance, especially when equipped with proper feature engineering and class imbalance strategies. However, each comes with its own set of caveats.
+
+### 1. **Random Forests**
+- **Description**: An ensemble learning method that operates by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes of the individual trees.
+- **Caveats**: While generally robust to overfitting, especially in comparison with individual decision trees, random forests can still overfit on very noisy data. They also tend to be less interpretable than simpler models like logistic regression, making it harder to understand the decision rules behind predictions.
+
+### 2. **Gradient Boosting Machines (GBMs)**
+- **Description**: An ensemble technique that builds trees one at a time, where each new tree helps to correct errors made by previously trained trees. Models like XGBoost, LightGBM, and CatBoost are popular due to their speed and performance.
+- **Caveats**: GBMs can be sensitive to overfitting if the number of trees is too large or the trees themselves are too deep. They also require careful tuning of parameters like learning rate, number of trees, and tree depth. While they are generally faster than CNNs for tabular data, their training time can still be significant with large datasets and complex models.
+
+### 3. **Support Vector Machines (SVMs)**
+- **Description**: SVMs are a set of supervised learning methods used for classification, regression, and outliers detection. They work well on smaller, cleaner datasets and can model non-linear boundaries thanks to the kernel trick.
+- **Caveats**: SVMs scale poorly to larger datasets, and their performance highly depends on the choice of kernel and regularization parameters. They also provide limited interpretability, making it difficult to understand the model's decision-making process.
+
+### 4. **Logistic Regression**
+- **Description**: Despite being a simpler approach, logistic regression can be quite effective for binary classification problems and is computationally efficient even with a large number of features after appropriate feature selection and engineering.
+- **Caveats**: Its linear nature means that logistic regression might not capture complex relationships between features as effectively as tree-based methods or neural networks. It also assumes linearity between the dependent variable and the independent variables, which may not always hold.
+
+### 5. **K-Nearest Neighbors (KNN)**
+- **Description**: A non-parametric, lazy learning algorithm that classifies data points based on the majority class among its k nearest neighbors.
+- **Caveits**: KNN is highly sensitive to the choice of k and the distance metric. It can be computationally expensive at prediction time, especially with large datasets, because it needs to compute the distance of a new point to all points in the training set. Also, its performance can degrade with high-dimensional data due to the curse of dimensionality.
+
+### General Caveats Across Alternative Models
+- **Feature Engineering**: Unlike CNNs, which can automatically extract complex features from raw data (e.g., images or sequences), these alternative models often rely on carefully engineered features, which can require domain knowledge and additional preprocessing steps.
+- **Class Imbalance**: While less computationally expensive, these models can still suffer from class imbalance issues. Techniques such as class weighting, oversampling the minority class, undersampling the majority class, or using synthetic data generation methods like SMOTE are crucial to ensure balanced learning.
+- **Hyperparameter Tuning**: Except for KNN and simpler logistic regression models, most of these alternatives require careful hyperparameter tuning to achieve optimal performance, which can be time-consuming and computationally expensive, especially in the absence of efficient search strategies.
+
+In summary, while alternative models to CNNs can be less computationally expensive and offer practical solutions for class-imbalanced datasets, each has its own trade-offs and requires careful consideration of their respective caveats to ensure they are appropriately applied to the specific problem at hand.
+
+
+
+
