@@ -8,7 +8,7 @@
 
 This repository contains a collection of Machine Learning homework assignments submitted for the course *BIOSTAT 546: Machine Learning*. These assignments demonstrate core competencies in linear modeling, bias-variance tradeoffs, simulation, model validation, and feature engineering using R.
 
-All homework files are included either as R script files (for Homework 1) or as PDF documents (for Homework 2–4), which are bundled into a compressed archive suitable for use within a file management system.
+All homework files are included either as R script files (for Homework 1) or as PDF documents (for Homework 2–4),
 
 ---
 
