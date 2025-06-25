@@ -83,7 +83,7 @@ These assignments demonstrate:
 **Kathleen Ashbaker**  
 Graduate Student, University of Washington  
 GitHub: [@QueenKatherys](https://github.com/QueenKatherys)  
-Email: Available upon request
+Email: kashba@uw.edu
 
 ---
 
