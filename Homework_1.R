@@ -56,5 +56,5 @@ These documents are stored in a **compressed folder** intended for use with a **
 
 For questions or collaborations:  
 **Kathleen Ashbaker**  
-Email: *[your-email@example.com]*  
-GitHub: [github.com/yourprofile](https://github.com/yourprofile)
+Email: *kashba@uw.edu*  
+GitHub: *https://github.com/QueenKatherys*
